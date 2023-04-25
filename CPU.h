@@ -1,5 +1,6 @@
 #include <cstdint> 
 #include <string>
+#include <map>
 #include <vector>
 
 class Bus;
@@ -11,6 +12,9 @@ class CPU
         ~CPU();
     
         void connect_bus(Bus* n);
+        bool complete();
+
+        std::map<uint16_t, std::string> disassemble(uint16_t nStart, uint16_t nStop);
 
         enum Flags
         {
@@ -60,7 +64,7 @@ class CPU
         uint8_t XXX();
 
         void clock();
-        void resert();
+        void reset();
         void interrupt_request_signal();
         void non_maskable_request_signal();
 
@@ -77,8 +81,8 @@ class CPU
     private:
         Bus *bus = nullptr;
 
-        uint8_t read(uint16_t a);
-        void write(uint16_t a, uint8_t b);
+        uint8_t read(uint16_t addr);
+        void write(uint16_t addr, uint8_t value);
 
         //Access to registers
         uint8_t get_Flag(Flags flag);

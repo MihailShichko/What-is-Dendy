@@ -35,14 +35,14 @@ void CPU::connect_bus(Bus *n)
     bus = n;
 }
 
-uint8_t CPU::read(uint16_t a)
+uint8_t CPU::read(uint16_t addr)
 {
-    return bus->read(a);
+    return bus->read(addr);
 }
 
-void CPU::write(uint16_t a, uint8_t b)
+void CPU::write(uint16_t addr, uint8_t value)
 {
-    bus->write(a,b);
+    bus->write(addr, value);
 }
 
 void CPU::clock()
@@ -64,6 +64,21 @@ void CPU::clock()
     }
 
     cycles--;
+}
+
+
+uint8_t CPU::get_Flag(Flags f)
+{
+	return ((status & f) > 0) ? 1 : 0;
+}
+
+// Sets or clears a specific bit of the status register
+void CPU::set_Flag(Flags f, bool v)
+{
+	if (v)
+		status |= f;
+	else
+		status &= ~f;
 }
 
 
@@ -291,3 +306,280 @@ uint8_t CPU::fetch()
 	return fetched;
 }
 
+uint8_t CPU::ADC()
+{
+	// Grab the data that we are adding to the accumulator
+	fetch();
+	
+	// Add is performed in 16-bit domain for emulation to capture any
+	// carry bit, which will exist in bit 8 of the 16-bit word
+	temp = (uint16_t)accumulator + (uint16_t)fetched + (uint16_t)get_Flag(C);
+	
+	// The carry flag out exists in the high byte bit 0
+	set_Flag(C, temp > 255);
+	
+	// The Zero flag is set if the result is 0
+	set_Flag(Z, (temp & 0x00FF) == 0);
+	
+	// The signed Overflow flag is set based on all that up there! :D
+	set_Flag(V, (~((uint16_t)accumulator ^ (uint16_t)fetched) & ((uint16_t)accumulator ^ (uint16_t)temp)) & 0x0080);
+	
+	// The negative flag is set to the most significant bit of the result
+	set_Flag(N, temp & 0x80);
+	
+	// Load the result into the accumulator (it's 8-bit dont forget!)
+	accumulator = temp & 0x00FF;
+	
+	// This instruction has the potential to require an additional clock cycle
+	return 1;
+}
+
+uint8_t CPU::SBC()
+{
+	fetch();
+	
+	// Operating in 16-bit domain to capture carry out
+	
+	// We can invert the bottom 8 bits with bitwise xor
+	uint16_t value = ((uint16_t)fetched) ^ 0x00FF;
+	
+	// Notice this is exactly the same as addition from here!
+	temp = (uint16_t)accumulator + value + (uint16_t)get_Flag(C);
+	set_Flag(C, temp & 0xFF00);
+	set_Flag(Z, ((temp & 0x00FF) == 0));
+	set_Flag(V, (temp ^ (uint16_t)accumulator) & (temp ^ value) & 0x0080);
+	set_Flag(N, temp & 0x0080);
+	accumulator = temp & 0x00FF;
+	return 1;
+}
+
+uint8_t CPU::PHA()
+{
+	write(0x0100 + stkp, accumulator);
+	stkp--;
+	return 0;
+}
+
+uint8_t CPU::PLA()
+{
+	stkp++;
+	accumulator = read(0x0100 + stkp);
+	set_Flag(Z, accumulator == 0x00);
+	set_Flag(N, accumulator & 0x80);
+	return 0;
+}
+
+void CPU::reset()
+{
+	accumulator = 0;
+	xReg = 0;
+	yReg = 0;
+	stkp = 0;
+	status = 0x00 | U;
+
+	addr_abs = 0xFFFc;
+	uint16_t lo = read(addr_abs + 0);
+	uint16_t hi = read(addr_abs + 1);
+	
+	program_counter = (hi << 8) | lo;
+
+	addr_rel = 0x0000;
+	addr_abs = 0x0000;
+	fetched = 0x00;
+
+	cycles = 8;
+}
+
+//INTERUPTS
+
+void CPU::interrupt_request_signal()
+{
+	if(get_Flag(I) == 0)
+	{
+		write(0x0100 + stkp, (program_counter >> 8) & 0x00FF);
+		stkp--;
+		write(0x0100 + stkp, program_counter & 0x00FF);
+		stkp--;
+
+		set_Flag(B,0);
+		set_Flag(U,1);
+		set_Flag(I,1);
+		write(0x0100 + stkp, status);
+		stkp--;
+
+		addr_abs = 0xFFFE;
+		uint16_t lo = read(addr_abs + 0);
+		uint16_t hi = read(addr_abs + 1);
+		program_counter = (hi << 8 | lo);
+
+		cycles = 7;
+	}
+}
+
+void CPU::non_maskable_request_signal()
+{
+	write(0x0100 + stkp, (program_counter >> 8) & 0x00FF);
+	stkp--;
+	write(0x0100 + stkp, program_counter & 0x00FF);
+	stkp--;
+
+	set_Flag(B,0);
+	set_Flag(U,1);
+	set_Flag(I,1);
+    write(0x0100 + stkp, status);
+	stkp--;
+
+	addr_abs = 0xFFFE;
+	uint16_t lo = read(addr_abs + 0);
+	uint16_t hi = read(addr_abs + 1);
+	program_counter = (hi << 8 | lo);
+
+	cycles = 8;
+}
+
+uint8_t CPU::RTI()
+{
+	stkp++;
+	status = read(0x0100 + stkp);
+	status &= ~B;
+	status &= ~U;
+	
+	stkp++;
+	program_counter = (uint16_t)read(0x100 + stkp);
+	program_counter |= (uint16_t)read(0x0100 + stkp) << 8;
+	return 0;
+}
+
+
+
+
+//HELPER
+bool CPU::complete()
+{
+	return cycles == 0;
+}
+
+// This is the disassembly function. Its workings are not required for emulation.
+// It is merely a convenience function to turn the binary instruction code into
+// human readable form. Its included as part of the emulator because it can take
+// advantage of many of the CPUs internal operations to do this.
+std::map<uint16_t, std::string> CPU::disassemble(uint16_t nStart, uint16_t nStop)
+{
+	uint32_t addr = nStart;
+	uint8_t value = 0x00, lo = 0x00, hi = 0x00;
+	std::map<uint16_t, std::string> mapLines;
+	uint16_t line_addr = 0;
+
+	// A convenient utility to convert variables into
+	// hex strings because "modern C++"'s method with 
+	// streams is atrocious
+	auto hex = [](uint32_t n, uint8_t d)
+	{
+		std::string s(d, '0');
+		for (int i = d - 1; i >= 0; i--, n >>= 4)
+			s[i] = "0123456789ABCDEF"[n & 0xF];
+		return s;
+	};
+
+	// Starting at the specified address we read an instruction
+	// byte, which in turn yields information from the lookup table
+	// as to how many additional bytes we need to read and what the
+	// addressing mode is. I need this info to assemble human readable
+	// syntax, which is different depending upon the addressing mode
+
+	// As the instruction is decoded, a std::string is assembled
+	// with the readable output
+	while (addr <= (uint32_t)nStop)
+	{
+		line_addr = addr;
+
+		// Prefix line with instruction address
+		std::string sInst = "$" + hex(addr, 4) + ": ";
+
+		// Read instruction, and get its readable name
+		uint8_t opcode = bus->read(addr, true); addr++;
+		sInst += lookup[opcode].name + " ";
+
+		// Get oprands from desired locations, and form the
+		// instruction based upon its addressing mode. These
+		// routines mimmick the actual fetch routine of the
+		// 6502 in order to get accurate data as part of the
+		// instruction
+		if (lookup[opcode].addrmode == &CPU::IMP)
+		{
+			sInst += " {IMP}";
+		}
+		else if (lookup[opcode].addrmode == &CPU::IMM)
+		{
+			value = bus->read(addr, true); addr++;
+			sInst += "#$" + hex(value, 2) + " {IMM}";
+		}
+		else if (lookup[opcode].addrmode == &CPU::ZP0)
+		{
+			lo = bus->read(addr, true); addr++;
+			hi = 0x00;												
+			sInst += "$" + hex(lo, 2) + " {ZP0}";
+		}
+		else if (lookup[opcode].addrmode == &CPU::ZPX)
+		{
+			lo = bus->read(addr, true); addr++;
+			hi = 0x00;														
+			sInst += "$" + hex(lo, 2) + ", X {ZPX}";
+		}
+		else if (lookup[opcode].addrmode == &CPU::ZPY)
+		{
+			lo = bus->read(addr, true); addr++;
+			hi = 0x00;														
+			sInst += "$" + hex(lo, 2) + ", Y {ZPY}";
+		}
+		else if (lookup[opcode].addrmode == &CPU::IZX)
+		{
+			lo = bus->read(addr, true); addr++;
+			hi = 0x00;								
+			sInst += "($" + hex(lo, 2) + ", X) {IZX}";
+		}
+		else if (lookup[opcode].addrmode == &CPU::IZY)
+		{
+			lo = bus->read(addr, true); addr++;
+			hi = 0x00;								
+			sInst += "($" + hex(lo, 2) + "), Y {IZY}";
+		}
+		else if (lookup[opcode].addrmode == &CPU::ABS)
+		{
+			lo = bus->read(addr, true); addr++;
+			hi = bus->read(addr, true); addr++;
+			sInst += "$" + hex((uint16_t)(hi << 8) | lo, 4) + " {ABS}";
+		}
+		else if (lookup[opcode].addrmode == &CPU::ABX)
+		{
+			lo = bus->read(addr, true); addr++;
+			hi = bus->read(addr, true); addr++;
+			sInst += "$" + hex((uint16_t)(hi << 8) | lo, 4) + ", X {ABX}";
+		}
+		else if (lookup[opcode].addrmode == &CPU::ABY)
+		{
+			lo = bus->read(addr, true); addr++;
+			hi = bus->read(addr, true); addr++;
+			sInst += "$" + hex((uint16_t)(hi << 8) | lo, 4) + ", Y {ABY}";
+		}
+		else if (lookup[opcode].addrmode == &CPU::IND)
+		{
+			lo = bus->read(addr, true); addr++;
+			hi = bus->read(addr, true); addr++;
+			sInst += "($" + hex((uint16_t)(hi << 8) | lo, 4) + ") {IND}";
+		}
+		else if (lookup[opcode].addrmode == &CPU::REL)
+		{
+			value = bus->read(addr, true); addr++;
+			sInst += "$" + hex(value, 2) + " [$" + hex(addr + value, 4) + "] {REL}";
+		}
+
+		// Add the formed string to a std::map, using the instruction's
+		// address as the key. This makes it convenient to look for later
+		// as the instructions are variable in length, so a straight up
+		// incremental index is not sufficient.
+		mapLines[line_addr] = sInst;
+	}
+
+	return mapLines;
+}
