@@ -35,21 +35,21 @@ void CPU::connect_bus(Bus *n)
     bus = n;
 }
 
-uint8_t CPU::read(uint16_t addr)
+uint8_t CPU::cpu_read(uint16_t addr)
 {
-    return bus->read(addr);
+    return bus->cpu_read(addr);
 }
 
-void CPU::write(uint16_t addr, uint8_t value)
+void CPU::cpu_write(uint16_t addr, uint8_t value)
 {
-    bus->write(addr, value);
+    bus->cpu_write(addr, value);
 }
 
 void CPU::clock()
 {
     if(cycles == 0)
     {
-        opcode = read(program_counter);
+        opcode = cpu_read(program_counter);
         program_counter++;
 
         //Get num of cycles
@@ -96,7 +96,7 @@ uint8_t CPU::IMP()
 
 // Address Mode: Immediate
 // The instruction expects the next byte to be used as a value, so we'll prep
-// the read address to point to the next byte
+// the cpu_read address to point to the next byte
 uint8_t CPU::IMM()
 {
 	addr_abs = program_counter++;	
@@ -111,7 +111,7 @@ uint8_t CPU::IMM()
 // one byte instead of the usual two.
 uint8_t CPU::ZP0()
 {
-	addr_abs = read(program_counter);	
+	addr_abs = cpu_read(program_counter);	
 	program_counter++;
 	addr_abs &= 0x00FF;
 	return 0;
@@ -125,7 +125,7 @@ uint8_t CPU::ZP0()
 // ranges within the first page.
 uint8_t CPU::ZPX()
 {
-	addr_abs = (read(program_counter) + xReg);
+	addr_abs = (cpu_read(program_counter) + xReg);
 	program_counter++;
 	addr_abs &= 0x00FF;
 	return 0;
@@ -136,7 +136,7 @@ uint8_t CPU::ZPX()
 // Same as above but uses Y Register for offset
 uint8_t CPU::ZPY()
 {
-	addr_abs = (read(program_counter) + yReg);
+	addr_abs = (cpu_read(program_counter) + yReg);
 	program_counter++;
 	addr_abs &= 0x00FF;
 	return 0;
@@ -149,7 +149,7 @@ uint8_t CPU::ZPY()
 // you cant directly branch to any address in the addressable range.
 uint8_t CPU::REL()
 {
-	addr_rel = read(program_counter);
+	addr_rel = cpu_read(program_counter);
 	program_counter++;
 	if (addr_rel & 0x80)
 		addr_rel |= 0xFF00;
@@ -161,9 +161,9 @@ uint8_t CPU::REL()
 // A full 16-bit address is loaded and used
 uint8_t CPU::ABS()
 {
-	uint16_t lo = read(program_counter);
+	uint16_t lo = cpu_read(program_counter);
 	program_counter++;
-	uint16_t hi = read(program_counter);
+	uint16_t hi = cpu_read(program_counter);
 	program_counter++;
 
 	addr_abs = (hi << 8) | lo;
@@ -178,9 +178,9 @@ uint8_t CPU::ABS()
 // the page, an additional clock cycle is required
 uint8_t CPU::ABX()
 {
-	uint16_t lo = read(program_counter);
+	uint16_t lo = cpu_read(program_counter);
 	program_counter++;
-	uint16_t hi = read(program_counter);
+	uint16_t hi = cpu_read(program_counter);
 	program_counter++;
 
 	addr_abs = (hi << 8) | lo;
@@ -199,9 +199,9 @@ uint8_t CPU::ABX()
 // the page, an additional clock cycle is required
 uint8_t CPU::ABY()
 {
-	uint16_t lo = read(program_counter);
+	uint16_t lo = cpu_read(program_counter);
 	program_counter++;
-	uint16_t hi = read(program_counter);
+	uint16_t hi = cpu_read(program_counter);
 	program_counter++;
 
 	addr_abs = (hi << 8) | lo;
@@ -216,29 +216,29 @@ uint8_t CPU::ABY()
 // Note: The next 3 address modes use indirection (aka Pointers!)
 
 // Address Mode: Indirect
-// The supplied 16-bit address is read to get the actual 16-bit address. This is
+// The supplied 16-bit address is cpu_read to get the actual 16-bit address. This is
 // instruction is unusual in that it has a bug in the hardware! To emulate its
 // function accurately, we also need to emulate this bug. If the low byte of the
-// supplied address is 0xFF, then to read the high byte of the actual address
+// supplied address is 0xFF, then to cpu_read the high byte of the actual address
 // we need to cross a page boundary. This doesnt actually work on the chip as 
 // designed, instead it wraps back around in the same page, yielding an 
 // invalid actual address
 uint8_t CPU::IND()
 {
-	uint16_t ptr_lo = read(program_counter);
+	uint16_t ptr_lo = cpu_read(program_counter);
 	program_counter++;
-	uint16_t ptr_hi = read(program_counter);
+	uint16_t ptr_hi = cpu_read(program_counter);
 	program_counter++;
 
 	uint16_t ptr = (ptr_hi << 8) | ptr_lo;
 
 	if (ptr_lo == 0x00FF) // Simulate page boundary hardware bug
 	{
-		addr_abs = (read(ptr & 0xFF00) << 8) | read(ptr + 0);
+		addr_abs = (cpu_read(ptr & 0xFF00) << 8) | cpu_read(ptr + 0);
 	}
 	else // Behave normally
 	{
-		addr_abs = (read(ptr + 1) << 8) | read(ptr + 0);
+		addr_abs = (cpu_read(ptr + 1) << 8) | cpu_read(ptr + 0);
 	}
 	
 	return 0;
@@ -247,15 +247,15 @@ uint8_t CPU::IND()
 
 // Address Mode: Indirect X
 // The supplied 8-bit address is offset by X Register to index
-// a location in page 0x00. The actual 16-bit address is read 
+// a location in page 0x00. The actual 16-bit address is cpu_read 
 // from this location
 uint8_t CPU::IZX()
 {
-	uint16_t t = read(program_counter);
+	uint16_t t = cpu_read(program_counter);
 	program_counter++;
 
-	uint16_t lo = read((uint16_t)(t + (uint16_t)xReg) & 0x00FF);
-	uint16_t hi = read((uint16_t)(t + (uint16_t)xReg + 1) & 0x00FF);
+	uint16_t lo = cpu_read((uint16_t)(t + (uint16_t)xReg) & 0x00FF);
+	uint16_t hi = cpu_read((uint16_t)(t + (uint16_t)xReg + 1) & 0x00FF);
 
 	addr_abs = (hi << 8) | lo;
 	
@@ -265,16 +265,16 @@ uint8_t CPU::IZX()
 
 // Address Mode: Indirect Y
 // The supplied 8-bit address indexes a location in page 0x00. From 
-// here the actual 16-bit address is read, and the contents of
+// here the actual 16-bit address is cpu_read, and the contents of
 // Y Register is added to it to offset it. If the offset causes a
 // change in page then an additional clock cycle is required.
 uint8_t CPU::IZY()
 {
-	uint16_t t = read(program_counter);
+	uint16_t t = cpu_read(program_counter);
 	program_counter++;
 
-	uint16_t lo = read(t & 0x00FF);
-	uint16_t hi = read((t + 1) & 0x00FF);
+	uint16_t lo = cpu_read(t & 0x00FF);
+	uint16_t hi = cpu_read((t + 1) & 0x00FF);
 
 	addr_abs = (hi << 8) | lo;
 	addr_abs += yReg;
@@ -292,7 +292,7 @@ uint8_t CPU::IZY()
 // fetch data as the source is implied by the instruction. For example
 // "INX" increments the X register. There is no additional data
 // required. For all other addressing modes, the data resides at 
-// the location held within addr_abs, so it is read from there. 
+// the location held within addr_abs, so it is cpu_read from there. 
 // Immediate adress mode exploits this slightly, as that has
 // set addr_abs = pc + 1, so it fetches the data from the
 // next byte for example "LDA $FF" just loads the accumulator with
@@ -302,7 +302,7 @@ uint8_t CPU::IZY()
 uint8_t CPU::fetch()
 {
 	if (!(lookup[opcode].addrmode == &CPU::IMP))
-		fetched = read(addr_abs);
+		fetched = cpu_read(addr_abs);
 	return fetched;
 }
 
@@ -355,7 +355,7 @@ uint8_t CPU::SBC()
 
 uint8_t CPU::PHA()
 {
-	write(0x0100 + stkp, accumulator);
+	cpu_write(0x0100 + stkp, accumulator);
 	stkp--;
 	return 0;
 }
@@ -363,7 +363,7 @@ uint8_t CPU::PHA()
 uint8_t CPU::PLA()
 {
 	stkp++;
-	accumulator = read(0x0100 + stkp);
+	accumulator = cpu_read(0x0100 + stkp);
 	set_Flag(Z, accumulator == 0x00);
 	set_Flag(N, accumulator & 0x80);
 	return 0;
@@ -378,8 +378,8 @@ void CPU::reset()
 	status = 0x00 | U;
 
 	addr_abs = 0xFFFc;
-	uint16_t lo = read(addr_abs + 0);
-	uint16_t hi = read(addr_abs + 1);
+	uint16_t lo = cpu_read(addr_abs + 0);
+	uint16_t hi = cpu_read(addr_abs + 1);
 	
 	program_counter = (hi << 8) | lo;
 
@@ -396,20 +396,20 @@ void CPU::interrupt_request_signal()
 {
 	if(get_Flag(I) == 0)
 	{
-		write(0x0100 + stkp, (program_counter >> 8) & 0x00FF);
+		cpu_write(0x0100 + stkp, (program_counter >> 8) & 0x00FF);
 		stkp--;
-		write(0x0100 + stkp, program_counter & 0x00FF);
+		cpu_write(0x0100 + stkp, program_counter & 0x00FF);
 		stkp--;
 
 		set_Flag(B,0);
 		set_Flag(U,1);
 		set_Flag(I,1);
-		write(0x0100 + stkp, status);
+		cpu_write(0x0100 + stkp, status);
 		stkp--;
 
 		addr_abs = 0xFFFE;
-		uint16_t lo = read(addr_abs + 0);
-		uint16_t hi = read(addr_abs + 1);
+		uint16_t lo = cpu_read(addr_abs + 0);
+		uint16_t hi = cpu_read(addr_abs + 1);
 		program_counter = (hi << 8 | lo);
 
 		cycles = 7;
@@ -418,20 +418,20 @@ void CPU::interrupt_request_signal()
 
 void CPU::non_maskable_request_signal()
 {
-	write(0x0100 + stkp, (program_counter >> 8) & 0x00FF);
+	cpu_write(0x0100 + stkp, (program_counter >> 8) & 0x00FF);
 	stkp--;
-	write(0x0100 + stkp, program_counter & 0x00FF);
+	cpu_write(0x0100 + stkp, program_counter & 0x00FF);
 	stkp--;
 
 	set_Flag(B,0);
 	set_Flag(U,1);
 	set_Flag(I,1);
-    write(0x0100 + stkp, status);
+    cpu_write(0x0100 + stkp, status);
 	stkp--;
 
 	addr_abs = 0xFFFE;
-	uint16_t lo = read(addr_abs + 0);
-	uint16_t hi = read(addr_abs + 1);
+	uint16_t lo = cpu_read(addr_abs + 0);
+	uint16_t hi = cpu_read(addr_abs + 1);
 	program_counter = (hi << 8 | lo);
 
 	cycles = 8;
@@ -440,13 +440,13 @@ void CPU::non_maskable_request_signal()
 uint8_t CPU::RTI()
 {
 	stkp++;
-	status = read(0x0100 + stkp);
+	status = cpu_read(0x0100 + stkp);
 	status &= ~B;
 	status &= ~U;
 	
 	stkp++;
-	program_counter = (uint16_t)read(0x100 + stkp);
-	program_counter |= (uint16_t)read(0x0100 + stkp) << 8;
+	program_counter = (uint16_t)cpu_read(0x100 + stkp);
+	program_counter |= (uint16_t)cpu_read(0x0100 + stkp) << 8;
 	return 0;
 }
 
@@ -481,9 +481,9 @@ std::map<uint16_t, std::string> CPU::disassemble(uint16_t nStart, uint16_t nStop
 		return s;
 	};
 
-	// Starting at the specified address we read an instruction
+	// Starting at the specified address we cpu_read an instruction
 	// byte, which in turn yields information from the lookup table
-	// as to how many additional bytes we need to read and what the
+	// as to how many additional bytes we need to cpu_read and what the
 	// addressing mode is. I need this info to assemble human readable
 	// syntax, which is different depending upon the addressing mode
 
@@ -497,7 +497,7 @@ std::map<uint16_t, std::string> CPU::disassemble(uint16_t nStart, uint16_t nStop
 		std::string sInst = "$" + hex(addr, 4) + ": ";
 
 		// Read instruction, and get its readable name
-		uint8_t opcode = bus->read(addr, true); addr++;
+		uint8_t opcode = bus->cpu_read(addr, true); addr++;
 		sInst += lookup[opcode].name + " ";
 
 		// Get oprands from desired locations, and form the
@@ -511,66 +511,66 @@ std::map<uint16_t, std::string> CPU::disassemble(uint16_t nStart, uint16_t nStop
 		}
 		else if (lookup[opcode].addrmode == &CPU::IMM)
 		{
-			value = bus->read(addr, true); addr++;
+			value = bus->cpu_read(addr, true); addr++;
 			sInst += "#$" + hex(value, 2) + " {IMM}";
 		}
 		else if (lookup[opcode].addrmode == &CPU::ZP0)
 		{
-			lo = bus->read(addr, true); addr++;
+			lo = bus->cpu_read(addr, true); addr++;
 			hi = 0x00;												
 			sInst += "$" + hex(lo, 2) + " {ZP0}";
 		}
 		else if (lookup[opcode].addrmode == &CPU::ZPX)
 		{
-			lo = bus->read(addr, true); addr++;
+			lo = bus->cpu_read(addr, true); addr++;
 			hi = 0x00;														
 			sInst += "$" + hex(lo, 2) + ", X {ZPX}";
 		}
 		else if (lookup[opcode].addrmode == &CPU::ZPY)
 		{
-			lo = bus->read(addr, true); addr++;
+			lo = bus->cpu_read(addr, true); addr++;
 			hi = 0x00;														
 			sInst += "$" + hex(lo, 2) + ", Y {ZPY}";
 		}
 		else if (lookup[opcode].addrmode == &CPU::IZX)
 		{
-			lo = bus->read(addr, true); addr++;
+			lo = bus->cpu_read(addr, true); addr++;
 			hi = 0x00;								
 			sInst += "($" + hex(lo, 2) + ", X) {IZX}";
 		}
 		else if (lookup[opcode].addrmode == &CPU::IZY)
 		{
-			lo = bus->read(addr, true); addr++;
+			lo = bus->cpu_read(addr, true); addr++;
 			hi = 0x00;								
 			sInst += "($" + hex(lo, 2) + "), Y {IZY}";
 		}
 		else if (lookup[opcode].addrmode == &CPU::ABS)
 		{
-			lo = bus->read(addr, true); addr++;
-			hi = bus->read(addr, true); addr++;
+			lo = bus->cpu_read(addr, true); addr++;
+			hi = bus->cpu_read(addr, true); addr++;
 			sInst += "$" + hex((uint16_t)(hi << 8) | lo, 4) + " {ABS}";
 		}
 		else if (lookup[opcode].addrmode == &CPU::ABX)
 		{
-			lo = bus->read(addr, true); addr++;
-			hi = bus->read(addr, true); addr++;
+			lo = bus->cpu_read(addr, true); addr++;
+			hi = bus->cpu_read(addr, true); addr++;
 			sInst += "$" + hex((uint16_t)(hi << 8) | lo, 4) + ", X {ABX}";
 		}
 		else if (lookup[opcode].addrmode == &CPU::ABY)
 		{
-			lo = bus->read(addr, true); addr++;
-			hi = bus->read(addr, true); addr++;
+			lo = bus->cpu_read(addr, true); addr++;
+			hi = bus->cpu_read(addr, true); addr++;
 			sInst += "$" + hex((uint16_t)(hi << 8) | lo, 4) + ", Y {ABY}";
 		}
 		else if (lookup[opcode].addrmode == &CPU::IND)
 		{
-			lo = bus->read(addr, true); addr++;
-			hi = bus->read(addr, true); addr++;
+			lo = bus->cpu_read(addr, true); addr++;
+			hi = bus->cpu_read(addr, true); addr++;
 			sInst += "($" + hex((uint16_t)(hi << 8) | lo, 4) + ") {IND}";
 		}
 		else if (lookup[opcode].addrmode == &CPU::REL)
 		{
-			value = bus->read(addr, true); addr++;
+			value = bus->cpu_read(addr, true); addr++;
 			sInst += "$" + hex(value, 2) + " [$" + hex(addr + value, 4) + "] {REL}";
 		}
 
